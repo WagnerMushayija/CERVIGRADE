@@ -8,6 +8,7 @@ models/*.pt
 models/*.pth
 models/*.h5
 models/*.onnx
+models/*.keras
 
 # Python noise
 __pycache__/
@@ -25,3 +26,9 @@ Thumbs.db
 docs/Literature_Review_1-10.docx
 docs/Literature_Review_1-15.docx
 docs/Presentation_Flow.docx
+
+# Files moved aside, waiting to be deleted by hand
+_to_delete/
+
+# Saved records, uploaded images and the login signing key from the running app
+app_data/
