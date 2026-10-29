@@ -30,16 +30,17 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, UploadFile
 from fastapi.concurrency import run_in_threadpool
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, RedirectResponse, Response
+from fastapi.staticfiles import StaticFiles
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 import db
 import institution
 import records
-from model import (CLASS_NAMES, LOW_CONFIDENCE, SEVERITY_ORDER, TIER_LABELS, TIER_MEMBERS, TIER_RANK, SEVERITY_RANK,
-                   is_using_real_model, model_identity, tier_of_class)
-import pipeline
-from security import hash_password, load_secret, make_token, read_token, verify_password
+from model import CLASS_NAMES, LOW_CONFIDENCE, SEVERITY_ORDER, TIER_LABELS, TIER_MEMBERS, TIER_RANK, SEVERITY_RANK, tier_of_class
+from pipeline import PIPELINE
+from security import TokenService, load_secret, verify_password
+from users import UserRepository
 
 MAX_IMAGES = 40
 MAX_BYTES = 15 * 1024 * 1024     # per image
@@ -49,7 +50,7 @@ EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg", "i
 db.init_db()
 db.adopt_institution_emails()
 db.bootstrap_admin()
-SECRET = load_secret(db.DATA_DIR)
+tokens = TokenService(load_secret(db.DATA_DIR))
 
 app = FastAPI(
     title="CerviGrade API",
@@ -78,11 +79,16 @@ def public_user(row):
     return d
 
 
-def current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer), conn=Depends(db.get_db)):
+def get_users(conn=Depends(db.get_db)):
+    """One UserRepository per request, on the same connection as everything else in that request."""
+    return UserRepository(conn)
+
+
+def current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer), users=Depends(get_users)):
     if creds is None:
         raise HTTPException(401, "Please sign in.")
-    uid = read_token(creds.credentials, SECRET)
-    row = conn.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone() if uid else None
+    uid = tokens.read(creds.credentials)
+    row = users.by_id(uid) if uid else None
     if row is None or not row["active"]:
         raise HTTPException(401, "Your session has ended. Please sign in again.")
     if not institution.is_institutional(row["username"]):
@@ -148,6 +154,13 @@ class FeedbackIn(BaseModel):
 FRONTEND_FILE = os.environ.get("CERVIGRADE_FRONTEND", os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html"))
 
 
+# The page's own stylesheet and scripts (css/ and js/ next to index.html), served at /css and /js so the page can load them.
+for _folder in ("css", "js"):
+    _path = os.path.join(os.path.dirname(FRONTEND_FILE), _folder)
+    if os.path.isdir(_path):
+        app.mount(f"/{_folder}", StaticFiles(directory=_path), name=_folder)
+
+
 @app.get("/", include_in_schema=False)
 def root():
     """Visitors land on the web page when it is next to the backend, otherwise on the Swagger docs."""
@@ -165,31 +178,30 @@ def web_page():
 @app.get("/health", tags=["status"])
 def health():
     """Liveness check. Also says whether real model weights are loaded or the stub predictor is running."""
-    name, version = model_identity()
+    name, version = PIPELINE.classifier.identity()
     return {"status": "ok", "classes": CLASS_NAMES, "severity_order": SEVERITY_ORDER, "tiers": TIER_MEMBERS,
-            "tier_labels": TIER_LABELS, "low_confidence_below": LOW_CONFIDENCE, "using_real_model": is_using_real_model(),
-            "model_name": name, "model_version": version, "detector": pipeline.detector_identity(),
-            "detector_conf": pipeline.DET_CONF, "cnn_sure": pipeline.CNN_SURE,
+            "tier_labels": TIER_LABELS, "low_confidence_below": LOW_CONFIDENCE, "using_real_model": PIPELINE.classifier.is_real,
+            "model_name": name, "model_version": version, "detector": PIPELINE.detector.identity,
+            "detector_conf": PIPELINE.detector.conf, "cnn_sure": PIPELINE.cnn_sure,
             "email_domains": None if institution.OPEN_TO_ANY else list(institution.DOMAINS)}
 
 
 # ------------------------------------------------------------------ auth
 
 @app.post("/auth/login", tags=["auth"])
-def login(body: LoginIn, conn=Depends(db.get_db)):
+def login(body: LoginIn, users=Depends(get_users)):
     username = institution.normalise(body.username)
     if not institution.is_institutional(username):
         raise HTTPException(403, institution.rejection_message())
     if _throttled(username):
         raise HTTPException(429, "Too many wrong passwords. Wait a few minutes and try again.")
-    row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
+    row = users.by_username(username)
     if row is None or not row["active"] or not verify_password(body.password, row["password_hash"]):
         _failures.setdefault(username, []).append(time.time())
         raise HTTPException(401, "Wrong email or password.")
     _failures.pop(username, None)
-    conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (db.now(), row["id"]))
-    conn.commit()
-    return {"token": make_token(row["id"], SECRET), "user": public_user(row)}
+    users.record_login(row["id"])
+    return {"token": tokens.make(row["id"]), "user": public_user(row)}
 
 
 @app.get("/auth/me", tags=["auth"])
@@ -198,84 +210,60 @@ def me(user=Depends(current_user)):
 
 
 @app.post("/auth/change-password", tags=["auth"])
-def change_password(body: PasswordIn, user=Depends(current_user), conn=Depends(db.get_db)):
+def change_password(body: PasswordIn, user=Depends(current_user), users=Depends(get_users)):
     if not verify_password(body.current_password, user["password_hash"]):
         raise HTTPException(400, "The current password is not right.")
-    conn.execute("UPDATE users SET password_hash = ? WHERE id = ?", (hash_password(body.new_password), user["id"]))
-    conn.commit()
+    users.set_password(user["id"], body.new_password)
     return {"ok": True}
 
 
 # ------------------------------------------------------------------ users (admin)
 
-def _active_admins(conn):
-    return conn.execute("SELECT COUNT(*) FROM users WHERE role = 'admin' AND active = 1").fetchone()[0]
-
-
 @app.get("/users", tags=["users"])
-def list_users(admin=Depends(require("admin")), conn=Depends(db.get_db)):
-    rows = conn.execute("""
-        SELECT u.*, (SELECT COUNT(*) FROM slides s WHERE s.uploaded_by = u.id) AS slides_uploaded,
-                    (SELECT COUNT(*) FROM feedback_entries f WHERE f.clinician_id = u.id) AS reviews_made
-        FROM users u ORDER BY u.active DESC, u.role, u.username""").fetchall()
-    return [{**public_user(r), "slides_uploaded": r["slides_uploaded"], "reviews_made": r["reviews_made"]} for r in rows]
+def list_users(admin=Depends(require("admin")), users=Depends(get_users)):
+    return [{**public_user(r), "slides_uploaded": r["slides_uploaded"], "reviews_made": r["reviews_made"]} for r in users.list_with_activity()]
 
 
 @app.post("/users", status_code=201, tags=["users"])
-def add_user(body: UserIn, admin=Depends(require("admin")), conn=Depends(db.get_db)):
+def add_user(body: UserIn, admin=Depends(require("admin")), users=Depends(get_users)):
     username = institution.normalise(body.username)
     if not institution.is_institutional(username):
         raise HTTPException(422, institution.rejection_message())
     try:
-        uid = db.create_user(conn, username, body.full_name.strip(), body.role, body.password)
+        uid = users.create(username, body.full_name.strip(), body.role, body.password)
     except sqlite3.IntegrityError:
         raise HTTPException(409, f"An account for {username} already exists.")
-    return public_user(conn.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone())
+    return public_user(users.by_id(uid))
 
 
 @app.patch("/users/{user_id}", tags=["users"])
-def edit_user(user_id: int, body: UserPatch, admin=Depends(require("admin")), conn=Depends(db.get_db)):
-    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+def edit_user(user_id: int, body: UserPatch, admin=Depends(require("admin")), users=Depends(get_users)):
+    row = users.by_id(user_id)
     if row is None:
         raise HTTPException(404, "No such user.")
     losing_admin = row["role"] == "admin" and row["active"] and (body.role not in (None, "admin") or body.active is False)
-    if losing_admin and _active_admins(conn) <= 1:
+    if losing_admin and users.count_active_admins() <= 1:
         raise HTTPException(409, "This is the last active admin. Make another admin first.")
     if user_id == admin["id"] and body.active is False:
         raise HTTPException(409, "You cannot deactivate your own account.")
-    fields, values = [], []
-    if body.full_name is not None:
-        fields.append("full_name = ?"); values.append(body.full_name.strip())
-    if body.role is not None:
-        fields.append("role = ?"); values.append(body.role)
-    if body.active is not None:
-        fields.append("active = ?"); values.append(int(body.active))
-    if body.password is not None:
-        fields.append("password_hash = ?"); values.append(hash_password(body.password))
-    if fields:
-        conn.execute(f"UPDATE users SET {', '.join(fields)} WHERE id = ?", (*values, user_id))
-        conn.commit()
-    return public_user(conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone())
+    users.update(user_id, full_name=body.full_name, role=body.role, active=body.active, password=body.password)
+    return public_user(users.by_id(user_id))
 
 
 @app.delete("/users/{user_id}", status_code=204, tags=["users"])
-def remove_user(user_id: int, admin=Depends(require("admin")), conn=Depends(db.get_db)):
-    row = conn.execute("SELECT * FROM users WHERE id = ?", (user_id,)).fetchone()
+def remove_user(user_id: int, admin=Depends(require("admin")), users=Depends(get_users)):
+    row = users.by_id(user_id)
     if row is None:
         raise HTTPException(404, "No such user.")
     if user_id == admin["id"]:
         raise HTTPException(409, "You cannot delete your own account.")
-    if row["role"] == "admin" and row["active"] and _active_admins(conn) <= 1:
+    if row["role"] == "admin" and row["active"] and users.count_active_admins() <= 1:
         raise HTTPException(409, "This is the last active admin.")
-    used = conn.execute("SELECT (SELECT COUNT(*) FROM slides WHERE uploaded_by = ?) + (SELECT COUNT(*) FROM feedback_entries WHERE clinician_id = ?)",
-                        (user_id, user_id)).fetchone()[0]
-    if used:
+    if users.usage_count(user_id):
         raise HTTPException(409, "This user has uploaded slides or reviewed grades, so the records need them. Deactivate the account instead.")
     try:
-        conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
-        conn.commit()
+        users.delete(user_id)
     except sqlite3.IntegrityError:
-        conn.rollback()
         raise HTTPException(409, "This user is still referenced by other records. Deactivate the account instead.")
 
 
@@ -369,10 +357,10 @@ async def upload_slide(patient_code: str = Form(...), note: Optional[str] = Form
             raise HTTPException(400, f"'{f.filename}' is larger than {MAX_BYTES // (1024 * 1024)} MB.")
         blobs.append(data); names.append((f.filename or "image")[:120]); types.append(f.content_type)
 
-    results = await run_in_threadpool(pipeline.analyze_many, blobs)
-    model_name, model_version = model_identity()
-    if pipeline.detector_ready():
-        model_name = f"{pipeline.detector_identity()} + {model_name}"
+    results = await run_in_threadpool(PIPELINE.analyze_many, blobs)
+    model_name, model_version = PIPELINE.classifier.identity()
+    if PIPELINE.detector.ready:
+        model_name = f"{PIPELINE.detector.identity} + {model_name}"
 
     slide_id = None
     try:
@@ -461,7 +449,7 @@ async def prediction_cam(prediction_id: int, cell: int = 0, overlay: bool = True
                           WHERE p.id = ?""", (prediction_id,)).fetchone()
     if row is None or not _can_see(user, row) or row["error"]:
         raise HTTPException(404, "No such prediction.")
-    if not is_using_real_model():
+    if not PIPELINE.classifier.is_real:
         raise HTTPException(409, "The explanation needs the real model, and only the placeholder is running.")
     path = os.path.join(db.uploads_for(row["slide_id"]), row["stored_name"])
     if not os.path.exists(path):
@@ -475,7 +463,7 @@ async def prediction_cam(prediction_id: int, cell: int = 0, overlay: bool = True
         if cell != 0:
             raise HTTPException(404, "No such cell.")
         box, grade = None, row["predicted_class"]
-    png = await run_in_threadpool(pipeline.cam_png, path, box, CLASS_NAMES.index(grade), overlay)
+    png = await run_in_threadpool(PIPELINE.explain, path, box, CLASS_NAMES.index(grade), overlay)
     return Response(content=png, media_type="image/png", headers={"Cache-Control": "private, max-age=3600"})
 
 

@@ -8,25 +8,46 @@ from datetime import datetime, timedelta, timezone
 
 import jwt
 
-_ITERATIONS = 200_000
-TOKEN_HOURS = 8
 
+class PasswordHasher:
+    """Turns a password into a salted PBKDF2 hash and checks a password against a stored hash. Passwords are never stored."""
 
-def hash_password(password: str) -> str:
-    salt = secrets.token_bytes(16)
-    digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, _ITERATIONS)
-    return f"pbkdf2_sha256${_ITERATIONS}${salt.hex()}${digest.hex()}"
+    def __init__(self, iterations=200_000):
+        self.iterations = iterations
 
+    def hash(self, password: str) -> str:
+        salt = secrets.token_bytes(16)
+        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), salt, self.iterations)
+        return f"pbkdf2_sha256${self.iterations}${salt.hex()}${digest.hex()}"
 
-def verify_password(password: str, stored: str) -> bool:
-    try:
-        scheme, iterations, salt_hex, digest_hex = stored.split("$")
-        if scheme != "pbkdf2_sha256":
+    def verify(self, password: str, stored: str) -> bool:
+        try:
+            scheme, iterations, salt_hex, digest_hex = stored.split("$")
+            if scheme != "pbkdf2_sha256":
+                return False
+            digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations))
+            return hmac.compare_digest(digest.hex(), digest_hex)
+        except Exception:
             return False
-        digest = hashlib.pbkdf2_hmac("sha256", password.encode("utf-8"), bytes.fromhex(salt_hex), int(iterations))
-        return hmac.compare_digest(digest.hex(), digest_hex)
-    except Exception:
-        return False
+
+
+class TokenService:
+    """Makes and reads the signed login tokens (JWT) that the page sends with every request."""
+
+    def __init__(self, secret: str, hours: int = 8):
+        self._secret = secret
+        self.hours = hours
+
+    def make(self, user_id: int) -> str:
+        exp = datetime.now(timezone.utc) + timedelta(hours=self.hours)
+        return jwt.encode({"sub": str(user_id), "exp": exp}, self._secret, algorithm="HS256")
+
+    def read(self, token: str):
+        """The user id inside a valid, unexpired token, or None."""
+        try:
+            return int(jwt.decode(token, self._secret, algorithms=["HS256"])["sub"])
+        except Exception:
+            return None
 
 
 def load_secret(data_dir: str) -> str:
@@ -43,14 +64,6 @@ def load_secret(data_dir: str) -> str:
     return key
 
 
-def make_token(user_id: int, key: str) -> str:
-    exp = datetime.now(timezone.utc) + timedelta(hours=TOKEN_HOURS)
-    return jwt.encode({"sub": str(user_id), "exp": exp}, key, algorithm="HS256")
-
-
-def read_token(token: str, key: str):
-    """The user id inside a valid, unexpired token, or None."""
-    try:
-        return int(jwt.decode(token, key, algorithms=["HS256"])["sub"])
-    except Exception:
-        return None
+_hasher = PasswordHasher()
+hash_password = _hasher.hash            # short names for code that only needs the default hasher
+verify_password = _hasher.verify
