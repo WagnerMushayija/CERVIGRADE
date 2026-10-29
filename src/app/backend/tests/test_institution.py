@@ -69,3 +69,13 @@ def test_first_admin_gets_an_institution_address():
     name = conn.execute("SELECT username FROM users").fetchone()[0]
     conn.close()
     assert name == "admin@alustudent.com" and inst.is_institutional(name)
+
+
+def test_policy_class_works_without_touching_the_environment():
+    inst, _ = load()
+    policy = inst.InstitutionPolicy(["@alustudent.com", " AluEducation.com "])
+    assert policy.domains == ("alustudent.com", "alueducation.com")
+    assert policy.is_institutional("x@alueducation.com") and not policy.is_institutional("x@gmail.com")
+    assert policy.describe() == "@alustudent.com or @alueducation.com"
+    assert "Only @alustudent.com or @alueducation.com accounts" in policy.rejection_message()
+    assert policy.default_admin_email() == "admin@alustudent.com"
