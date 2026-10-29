@@ -82,7 +82,7 @@ Swagger UI is at http://localhost:8000/docs.
 The technician uploads microscope field photos. A YOLO detector (`models/stage2_severity_oversampled_best.pt`)
 boxes the cells, the retrained EfficientNetB0 (`models/efficientnetb0_cric_retrained.keras`) grades each one, and the
 photo's result is the most serious grade among cells the model is at least 90% sure of. The page draws the boxes;
-click one to see how that cell was graded. A full photo takes roughly 15 to 30 seconds on a laptop CPU.
+click one to see how that cell was graded. A full photo takes a few minutes on a laptop CPU (about 3 minutes on the author's laptop; the time is printed in the terminal for each photo).
 
 Three roles: a lab technician uploads a patient's slide images, a clinician
 confirms or corrects each grade, and the admin (the data scientist) manages

@@ -61,6 +61,7 @@ def test_a_sure_abnormal_cell_sets_the_photo_result():
     r = run([("Negative", 0.99), ("HSIL", 0.95), ("Negative", 0.9)])
     assert r["mode"] == "field" and r["predicted_class"] == "HSIL" and r["tier"] == "high"
     assert r["detections"]["counted"] == 3 and r["detections"]["set_aside"] == 0
+    assert set(r["detections"]["timings"]) == {"detect_s", "classify_s"}      # how long each stage took, for performance testing
 
 
 def test_an_unsure_abnormal_cell_is_set_aside_and_flags_the_photo():

@@ -21,6 +21,7 @@ Two classes do the work:
 
 import os
 import threading
+import time
 
 import numpy as np
 
@@ -175,15 +176,20 @@ class FieldPipeline:
 
     # ---- a field photo: detect, crop, grade every cell, then decide
     def _grade_field(self, img, W, H):
+        t0 = time.perf_counter()
         with self._lock:
             boxes, det_scores = self.detector.find_cells(img)
+        detect_s = time.perf_counter() - t0
         if len(boxes) == 0:
             return {"error": "The detector found no cells in this photo. Check that it is a microscope field photo."}
         order = np.argsort(-det_scores)[:MAX_CELLS]
         boxes, det_scores = boxes[order], det_scores[order]
         crops = [crop_at(img, (b[0] + b[2]) / 2, (b[1] + b[3]) / 2) for b in boxes]
+        t1 = time.perf_counter()
         with self._lock:
             probs = self.classifier.predict(crops)                      # (n, 6)
+        classify_s = time.perf_counter() - t1
+        print(f"[pipeline] {W}x{H} photo: {len(boxes)} cells, detector {detect_s:.1f} s, classifier {classify_s:.1f} s")
 
         cls = probs.argmax(1)
         conf = probs.max(1)
@@ -234,6 +240,7 @@ class FieldPipeline:
                 "decisive": decisive,
                 "found": len(cells), "counted": len(idx_counted), "set_aside": len(set_aside),
                 "counted_by_tier": counts_by_tier,
+                "timings": {"detect_s": round(detect_s, 2), "classify_s": round(classify_s, 2)},
                 "cells": cells,
             },
         }

@@ -9,7 +9,7 @@ export class GradingProgress {
     this._startedAt = 0;
     this._timers = [];
     this._title = el("b", {}, "Finding and grading the cells");
-    this._why = el("span", { class: "why" }, `${plural(photoCount, "photo")}. A full photo takes about 15 to 30 seconds. Please keep this page open.`);
+    this._why = el("span", { class: "why" }, `${plural(photoCount, "photo")}. A full photo can take a few minutes on a laptop. Please keep this page open.`);
     this._time = el("span", { class: "time" }, "0:00");
     this._spin = el("span", { class: "spin" });
     this.node = el("div", { class: "working", role: "status" }, this._spin, el("div", {}, this._title, this._why), this._time, el("span", { class: "bar" }));
@@ -32,7 +32,7 @@ export class GradingProgress {
     if (this._misses < 3 && sec >= 75) {
       this.node.classList.add("slow");
       this._title.textContent = "Still working";
-      this._why.textContent = "Big photos can take a minute or two on a slower computer. The server is still answering, so this is not frozen.";
+      this._why.textContent = "Big photos can take a few minutes on a laptop CPU. The server is still answering, so this is not frozen.";
     }
   }
 
