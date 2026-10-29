@@ -7,7 +7,7 @@ Read this before any meeting. It answers: where does the backend run from, what 
 CerviGrade is two programs that talk to each other over HTTP:
 
 - **The backend** (`src/app/backend/`) is a Python program built with FastAPI. It does everything that matters: sign-in, saving records, running the detector and the CNN, making the Grad-CAM pictures.
-- **The frontend** (`src/app/frontend/index.html`) is one web page with its own JavaScript. It only draws screens and calls the backend. The backend also hands the page out, at `/app`.
+- **The frontend** (`src/app/frontend/`) is a web page: `index.html` plus a `css/` and a `js/` folder of plain JavaScript. It only draws screens and calls the backend. The backend also hands the page out, at `/app`.
 
 Both run **on your own laptop**. Nothing is hosted online unless you share it with a tunnel. When the page says "images are kept on the computer running the server", that computer is your laptop.
 
@@ -22,7 +22,7 @@ Useful addresses once it runs:
 
 | Address | What you get |
 |---|---|
-| `/` or `/app` | The web page |
+| `/` or `/app` | The web page (its scripts and styles come from `/js` and `/css`) |
 | `/docs` | Swagger: a list of every backend endpoint, where you can try them |
 | `/health` | A quick "is it alive" check, plus which models are loaded |
 
@@ -43,20 +43,37 @@ Inside `app_data/`:
 
 Delete `app_data/` and the app starts empty, with a new admin account. Set the environment variable `CERVIGRADE_DATA` to keep the data somewhere else.
 
-## 3. What each backend file does
+## 3. What each file does, and where the classes are
 
-| File | Job |
+A **class** is a cookie cutter: it bundles some data with the actions that belong to it. The backend and the page both use them.
+
+**Backend** (`src/app/backend/`):
+
+| File | Classes | Job |
+|---|---|---|
+| `main.py` | | The front door. Defines every endpoint (sign-in, users, slides, Grad-CAM, feedback, stats) and who may call it. |
+| `classifiers.py` | `Classifier` (rulebook), `EfficientNetClassifier`, `StubClassifier` | Grades cell crops. The real model and the placeholder both follow the same rulebook, so the app does not care which one it has. |
+| `pipeline.py` | `CellDetector`, `FieldPipeline` | The detector finds cells; the pipeline joins it to a classifier and decides the photo's result. |
+| `institution.py` | `InstitutionPolicy` | The email rule: only `@alustudent.com`. |
+| `security.py` | `PasswordHasher`, `TokenService` | Salted password hashes (PBKDF2) and signed login tokens (JWT, 8 hours). |
+| `users.py` | `UserRepository` | All database work for accounts. |
+| `db.py` | | Opens the database, creates the tables, adds the first admin. |
+| `records.py` | | Builds the answers the page shows (a slide with its images, grades and reviews). |
+| `model.py` | | The grading vocabulary: the six grades, the three groups, how to turn probabilities into a result. |
+| `gradcam.py` | | Paints the heat as a coloured overlay. |
+| `manage.py` | | Admin commands from the terminal: `list-users`, `create-user`, `reset-password`, `seed-demo`. |
+| `tests/` | | Automated tests (`python -m pytest tests -q`). |
+
+**Page** (`src/app/frontend/`): `index.html` is only the markup. `css/styles.css` is the look. Behaviour is in `js/`:
+
+| Folder | Classes |
 |---|---|
-| `main.py` | The front door. Defines every endpoint (sign-in, users, slides, Grad-CAM, feedback, stats) and who is allowed to call it. |
-| `institution.py` | The email rule: only `@alustudent.com` addresses. |
-| `security.py` | Password hashing (PBKDF2 with a random salt, so passwords are never stored) and login tokens (JWT, valid 8 hours). |
-| `db.py` | Opens the database, creates the tables, adds the first admin. |
-| `records.py` | Builds the answers the page shows (a slide with its images, grades and reviews). |
-| `pipeline.py` | The grading steps for a field photo: detector, crops, CNN, the "sure" rule, the verdict. |
-| `model.py` | Loads the CNN, grades crops, computes Grad-CAM heat. |
-| `gradcam.py` | Paints the heat as a coloured overlay. |
-| `manage.py` | Admin commands from the terminal: `list-users`, `create-user`, `reset-password`, `seed-demo`. |
-| `tests/` | Automated tests (`python -m pytest tests -q`). |
+| `js/App.js` | `App`: builds the shared parts once and hands them to every screen |
+| `js/core/` | `ApiClient` (every call to the backend), `Session` (who is signed in), `Router` (address to page), `Store`, `Toast`, `Lightbox`, `DangerButton`, `InstitutionInfo` |
+| `js/components/` | `FieldViewer` (photo with boxes), `CamPanel` (Grad-CAM close-up), `Navbar`, `GradingProgress`, `PublicChrome` |
+| `js/pages/` | `Page` (rulebook), then one class per screen that follows it: `LoginPage`, `NewCheckPage`, `SlideListPage`, `SlideDetailPage`, `UsersPage`, `RecordsPage`, `AccountPage` |
+
+The OOP ideas, in your own code: **abstraction and polymorphism** (`Classifier` and its two versions, `Page` and its seven screens), **inheritance** (each subclass builds on its rulebook), **encapsulation** (`UserRepository` is the only place that knows the users table), **separation of concerns** (one job per file).
 
 ## 4. The database
 
