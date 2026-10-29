@@ -39,10 +39,12 @@ two-pass scan-then-confirm pipeline over technician-captured image batches.
     pip install -r requirements.txt
     uvicorn main:app --reload --port 8000
 
-The first time it starts, it creates one admin account and prints the username
-(`admin`) and a random password in the terminal. Copy the password then, because
-it is shown once. Open `src/app/frontend/index.html` in a browser, sign in, and
-add technicians and clinicians under Users. There is no public sign-up.
+The first time it starts, it creates one admin account and prints its email
+(`admin@alustudent.com`) and a random password in the terminal. Copy the password then, because
+it is shown once. Open http://localhost:8000 in a browser, sign in, and
+add technicians and clinicians under Users. There is no public sign-up, and only
+`@alustudent.com` addresses are accepted, both when an account is added and when someone signs in.
+Accounts made before this rule (`admin`, `tech1`) get the domain added to their name on the next start.
 Swagger UI is at http://localhost:8000/docs.
 
 The technician uploads microscope field photos. A YOLO detector (`models/stage2_severity_oversampled_best.pt`)
@@ -54,17 +56,36 @@ Three roles: a lab technician uploads a patient's slide images, a clinician
 confirms or corrects each grade, and the admin (the data scientist) manages
 users, patient codes and slides. Patients are pseudonym codes, never names.
 
+The backend also serves the web page, so you can open http://localhost:8000 and it
+takes you to the page. Opening `src/app/frontend/index.html` as a file still works.
+
+### Sharing it for a demo (free)
+
+Run the backend as above, then in a second terminal:
+
+    winget install --id Cloudflare.cloudflared
+    cloudflared tunnel --url http://localhost:8000
+
+It prints a `https://....trycloudflare.com` address. Send that one link; it opens the
+same page for anyone. The address changes each time, there is no uptime guarantee, and
+your computer has to stay on. Press Ctrl+C in that terminal to close it. Use a strong
+admin password (`CERVIGRADE_ADMIN_PASSWORD`) and only public dataset images while it
+is open, because Cloudflare carries the traffic.
+
 Records are saved in `app_data/` at the repo root (a SQLite database plus the
 uploaded images, not tracked by git). Delete that folder to start fresh.
 
 Useful settings (environment variables): `CERVIGRADE_MODEL` (a CNN weights file other
 than `models/efficientnetb0_cric_retrained.keras`), `CERVIGRADE_DETECTOR` (a detector file other than the one above),
 `CERVIGRADE_DET_CONF` (0.25) and `CERVIGRADE_CNN_SURE` (0.9), `CERVIGRADE_ADMIN_PASSWORD` (choose
-the first admin password instead of a random one), `CERVIGRADE_DATA` (move the
+the first admin password instead of a random one), `CERVIGRADE_EMAIL_DOMAINS` (allowed email domains, comma
+separated, default `alustudent.com`; `*` turns the rule off), `CERVIGRADE_ADMIN_EMAIL`, `CERVIGRADE_DATA` (move the
 data folder).
 
 If you are locked out or want demo accounts, run from `src/app/backend`:
 
     python manage.py list-users
-    python manage.py reset-password admin "a new password"
+    python manage.py reset-password admin@alustudent.com "a new password"
     python manage.py seed-demo
+
+Tests for the email rule (no model weights needed): `cd src/app/backend && python -m pytest tests -q`.
