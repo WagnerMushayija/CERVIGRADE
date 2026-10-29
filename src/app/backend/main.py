@@ -34,6 +34,7 @@ from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from pydantic import BaseModel, Field
 
 import db
+import institution
 import records
 from model import (CLASS_NAMES, LOW_CONFIDENCE, SEVERITY_ORDER, TIER_LABELS, TIER_MEMBERS, TIER_RANK, SEVERITY_RANK,
                    is_using_real_model, model_identity, tier_of_class)
@@ -43,10 +44,10 @@ from security import hash_password, load_secret, make_token, read_token, verify_
 MAX_IMAGES = 40
 MAX_BYTES = 15 * 1024 * 1024     # per image
 CODE_RE = re.compile(r"^[A-Za-z0-9_-]{3,32}$")           # a code, so no spaces and no room for a name
-USERNAME_RE = re.compile(r"^[a-z0-9._-]{3,32}$")
 EXTENSIONS = {"image/png": ".png", "image/jpeg": ".jpg", "image/jpg": ".jpg", "image/bmp": ".bmp", "image/tiff": ".tif", "image/webp": ".webp"}
 
 db.init_db()
+db.adopt_institution_emails()
 db.bootstrap_admin()
 SECRET = load_secret(db.DATA_DIR)
 
@@ -84,6 +85,8 @@ def current_user(creds: Optional[HTTPAuthorizationCredentials] = Depends(bearer)
     row = conn.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone() if uid else None
     if row is None or not row["active"]:
         raise HTTPException(401, "Your session has ended. Please sign in again.")
+    if not institution.is_institutional(row["username"]):
+        raise HTTPException(403, institution.rejection_message())
     return dict(row)
 
 
@@ -142,10 +145,21 @@ class FeedbackIn(BaseModel):
 
 # ------------------------------------------------------------------ status
 
+FRONTEND_FILE = os.environ.get("CERVIGRADE_FRONTEND", os.path.join(os.path.dirname(__file__), "..", "frontend", "index.html"))
+
+
 @app.get("/", include_in_schema=False)
 def root():
-    """The API has no page of its own. Send visitors to the Swagger docs; the web page is frontend/index.html."""
-    return RedirectResponse(url="/docs")
+    """Visitors land on the web page when it is next to the backend, otherwise on the Swagger docs."""
+    return RedirectResponse(url="/app" if os.path.exists(FRONTEND_FILE) else "/docs")
+
+
+@app.get("/app", include_in_schema=False)
+def web_page():
+    """The web page itself, so one address (this server's) serves everything: handy locally and behind a tunnel or a host."""
+    if not os.path.exists(FRONTEND_FILE):
+        raise HTTPException(404, "The web page file was not found next to the backend.")
+    return FileResponse(FRONTEND_FILE, media_type="text/html", headers={"Cache-Control": "no-cache"})
 
 
 @app.get("/health", tags=["status"])
@@ -155,20 +169,23 @@ def health():
     return {"status": "ok", "classes": CLASS_NAMES, "severity_order": SEVERITY_ORDER, "tiers": TIER_MEMBERS,
             "tier_labels": TIER_LABELS, "low_confidence_below": LOW_CONFIDENCE, "using_real_model": is_using_real_model(),
             "model_name": name, "model_version": version, "detector": pipeline.detector_identity(),
-            "detector_conf": pipeline.DET_CONF, "cnn_sure": pipeline.CNN_SURE}
+            "detector_conf": pipeline.DET_CONF, "cnn_sure": pipeline.CNN_SURE,
+            "email_domains": None if institution.OPEN_TO_ANY else list(institution.DOMAINS)}
 
 
 # ------------------------------------------------------------------ auth
 
 @app.post("/auth/login", tags=["auth"])
 def login(body: LoginIn, conn=Depends(db.get_db)):
-    username = body.username.strip().lower()
+    username = institution.normalise(body.username)
+    if not institution.is_institutional(username):
+        raise HTTPException(403, institution.rejection_message())
     if _throttled(username):
         raise HTTPException(429, "Too many wrong passwords. Wait a few minutes and try again.")
     row = conn.execute("SELECT * FROM users WHERE username = ?", (username,)).fetchone()
     if row is None or not row["active"] or not verify_password(body.password, row["password_hash"]):
         _failures.setdefault(username, []).append(time.time())
-        raise HTTPException(401, "Wrong username or password.")
+        raise HTTPException(401, "Wrong email or password.")
     _failures.pop(username, None)
     conn.execute("UPDATE users SET last_login = ? WHERE id = ?", (db.now(), row["id"]))
     conn.commit()
@@ -206,13 +223,13 @@ def list_users(admin=Depends(require("admin")), conn=Depends(db.get_db)):
 
 @app.post("/users", status_code=201, tags=["users"])
 def add_user(body: UserIn, admin=Depends(require("admin")), conn=Depends(db.get_db)):
-    username = body.username.strip().lower()
-    if not USERNAME_RE.match(username):
-        raise HTTPException(422, "A username is 3 to 32 letters, numbers, dots, dashes or underscores.")
+    username = institution.normalise(body.username)
+    if not institution.is_institutional(username):
+        raise HTTPException(422, institution.rejection_message())
     try:
         uid = db.create_user(conn, username, body.full_name.strip(), body.role, body.password)
     except sqlite3.IntegrityError:
-        raise HTTPException(409, f"The username '{username}' is already taken.")
+        raise HTTPException(409, f"An account for {username} already exists.")
     return public_user(conn.execute("SELECT * FROM users WHERE id = ?", (uid,)).fetchone())
 
 

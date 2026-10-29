@@ -14,6 +14,7 @@ import secrets
 import sqlite3
 from datetime import datetime, timezone
 
+import institution
 from security import hash_password
 
 _REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
@@ -129,6 +130,33 @@ def create_user(conn, username, full_name, role, password) -> int:
     return cur.lastrowid
 
 
+def adopt_institution_emails():
+    """
+    Accounts made before the email rule have plain usernames ('admin', 'tech1'). Without a fix nobody could sign in,
+    the administrator included, so each one gets the institution domain added to its name ('admin' -> 'admin@alustudent.com').
+    Names that are already allowed are left alone, and so is any name whose new form is already taken.
+    """
+    if institution.OPEN_TO_ANY:
+        return
+    domain = institution.DOMAINS[0]
+    conn = connect()
+    try:
+        taken = {r[0] for r in conn.execute("SELECT username FROM users")}
+        for (uid, name) in conn.execute("SELECT id, username FROM users").fetchall():
+            if institution.is_institutional(name):
+                continue
+            new = f"{name}@{domain}"
+            if "@" in name or new in taken or not institution.is_institutional(new):
+                print(f"[accounts] '{name}' cannot sign in: it is not an {institution.describe_domains()} address. Rename it or add a new account.")
+                continue
+            conn.execute("UPDATE users SET username = ? WHERE id = ?", (new, uid))
+            taken.add(new)
+            print(f"[accounts] '{name}' is now '{new}' (accounts must use an {institution.describe_domains()} address).")
+        conn.commit()
+    finally:
+        conn.close()
+
+
 def bootstrap_admin():
     """On the very first start there are no users, so create one admin and say so in the terminal."""
     conn = connect()
@@ -136,11 +164,12 @@ def bootstrap_admin():
         if conn.execute("SELECT COUNT(*) FROM users").fetchone()[0] > 0:
             return
         password = os.environ.get("CERVIGRADE_ADMIN_PASSWORD") or secrets.token_urlsafe(9)
-        create_user(conn, "admin", "Administrator", "admin", password)
+        email = institution.default_admin_email()
+        create_user(conn, email, "Administrator", "admin", password)
         shown = "(the one you set in CERVIGRADE_ADMIN_PASSWORD)" if os.environ.get("CERVIGRADE_ADMIN_PASSWORD") else password
         print("\n" + "=" * 62)
         print(" First start: an admin account was created.")
-        print("   username: admin")
+        print(f"   email:    {email}")
         print(f"   password: {shown}")
         print(" Sign in, then add your technicians and clinicians under Users.")
         print("=" * 62 + "\n")
