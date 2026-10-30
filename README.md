@@ -67,9 +67,14 @@ How the data, database and endpoints fit together: `docs/How_CerviGrade_Works.md
 
 ## Data
 
-1. Run `python src/preprocessing/download_cric_dataset.py` to fetch the
-   CRIC dataset into `data/raw/CRIC_dataset/`.
-2. (SIPaKMeD and Mendeley download steps go here once added.)
+You do not need any dataset to run the app. The two trained models it uses are
+in `models/`. The data is only needed to retrain the models or re-run the
+notebooks in `notebooks/`.
+
+To get the CRIC dataset for that, run
+`python src/preprocessing/download_cric_dataset.py`. It downloads the images
+into `data/raw/CRIC_dataset/`. (SIPaKMeD and Mendeley download steps go here
+once added.)
 
 ## Running the app
 
