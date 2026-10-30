@@ -5,6 +5,12 @@ images by the most serious cervical cell abnormality found. A YOLO11n detector
 finds the cells in each photo, an EfficientNetB0 classifier grades every cell,
 and a clinician confirms or corrects each result.
 
+## Technical report
+
+[CerviGrade technical implementation report](https://drive.google.com/file/d/1jSo5MI7DB4pnNtziff3Bji0knO4XzdOv/view?usp=drive_link)
+
+The walkthrough video link will be added here.
+
 ## Folder layout
 
 - `data/raw/` - datasets exactly as downloaded (CRIC, SIPaKMeD, Mendeley).
