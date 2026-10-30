@@ -1,15 +1,2 @@
-# Python packages this project depends on.
-# Install them all at once with: pip install -r requirements.txt
-torch
-torchvision
-timm
-scikit-learn
-pandas
-numpy
-opencv-python
-albumentations
-matplotlib
-fastapi
-uvicorn
-python-multipart
-py7zr
+# The app's packages. The notebooks ran on Kaggle, which already provides their libraries.
+-r src/app/backend/requirements.txt
