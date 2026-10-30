@@ -32,7 +32,7 @@ Useful addresses once it runs:
 |---|---|
 | Backend code | `src/app/backend/*.py` |
 | Web page | `src/app/frontend/index.html` |
-| Model files | `models/` (`efficientnetb0_cric_retrained.keras` is the CNN, `stage2_severity_oversampled_best.pt` is the YOLO detector). They are not on GitHub, because `.gitignore` excludes them. |
+| Model files | `models/` (`efficientnetb0_cric_retrained.keras` is the CNN, `stage2_severity_oversampled_best.pt` is the YOLO detector). They are on GitHub, force-added past `.gitignore` (which skips other weight files). |
 | **Database and uploaded photos** | **`app_data/` in the repo root** (not on GitHub either) |
 
 Inside `app_data/`:
