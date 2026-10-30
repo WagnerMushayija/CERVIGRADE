@@ -9,7 +9,10 @@ and a clinician confirms or corrects each result.
 
 [CerviGrade technical implementation report](https://drive.google.com/file/d/1jSo5MI7DB4pnNtziff3Bji0knO4XzdOv/view?usp=drive_link)
 
-The walkthrough video link will be added here.
+[Walkthrough video](https://vimeo.com/1241283737)
+
+Every experiment that was run, with its result and the notebook it came from, is in
+[`docs/Experiments_Log.md`](docs/Experiments_Log.md).
 
 ## Folder layout
 
@@ -73,8 +76,8 @@ notebooks in `notebooks/`.
 
 To get the CRIC dataset for that, run
 `python src/preprocessing/download_cric_dataset.py`. It downloads the images
-into `data/raw/CRIC_dataset/`. (SIPaKMeD and Mendeley download steps go here
-once added.)
+into `data/raw/CRIC_dataset/`. The SIPaKMeD and Mendeley data were used only
+inside the Kaggle notebooks.
 
 ## Running the app
 
