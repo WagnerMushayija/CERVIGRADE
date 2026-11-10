@@ -8,7 +8,8 @@ this interface, so it does not care whether the real model or the placeholder is
       EfficientNetClassifier    the trained EfficientNetB0, with Grad-CAM
       StubClassifier            made-up numbers, so the page can be tried when the weights file is missing
 
-load_classifier() picks the real one when the weights load and falls back to the placeholder otherwise.
+load_classifier() returns the real one, and raises ModelLoadError when the weights cannot be loaded. The placeholder is only
+returned when the caller asks for it on purpose (allow_placeholder=True), so the app never grades with made-up numbers by accident.
 """
 
 import os
@@ -18,7 +19,7 @@ from datetime import datetime, timezone
 
 import numpy as np
 
-from model import CLASS_NAMES, MODEL_PATH
+from services.grading import CLASS_NAMES, MODEL_PATH
 
 
 class Classifier(ABC):
@@ -130,15 +131,26 @@ class StubClassifier(Classifier):
         return np.array(rows, dtype="float32")
 
 
-def load_classifier(path=MODEL_PATH):
-    """The real classifier when the weights file loads, otherwise the placeholder (and the terminal says so)."""
+class ModelLoadError(RuntimeError):
+    """The trained classifier could not be loaded."""
+
+
+def load_classifier(path=MODEL_PATH, allow_placeholder=False):
+    """
+    The real classifier. If the weights file is missing or will not load, this raises ModelLoadError, so nothing can
+    grade with made-up numbers by accident. Pass allow_placeholder=True to get the labelled placeholder instead
+    (for demos and tests); the terminal then says loudly that the grades are not real.
+    """
     if not os.path.exists(path):
-        print(f"[model] No checkpoint at {path}, using the stub predictor")
+        problem = f"there is no classifier file at {path}"
+    else:
+        try:
+            classifier = EfficientNetClassifier(path)
+            print(f"[model] Loaded real checkpoint from {path}")
+            return classifier
+        except Exception as e:
+            problem = f"the classifier file {path} failed to load ({str(e)[:200]})"
+    if allow_placeholder:
+        print(f"[model] PLACEHOLDER: {problem}. Grades will be made up.")
         return StubClassifier()
-    try:
-        classifier = EfficientNetClassifier(path)
-        print(f"[model] Loaded real checkpoint from {path}")
-        return classifier
-    except Exception as e:
-        print(f"[model] Found {path} but failed to load it, falling back to stub: {e}")
-        return StubClassifier()
+    raise ModelLoadError(problem)

@@ -1,13 +1,14 @@
 """Passwords, login tokens and the users table."""
 
 import importlib
-import sqlite3
 import sys
 import tempfile
 
 import pytest
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import Session
 
-from security import PasswordHasher, TokenService
+from core.security import PasswordHasher, TokenService
 
 
 def test_a_password_checks_out_against_its_own_hash_only():
@@ -44,33 +45,32 @@ def test_tokens_from_another_key_or_tampered_or_expired_are_refused():
 @pytest.fixture
 def repo(monkeypatch):
     monkeypatch.setenv("CERVIGRADE_DATA", tempfile.mkdtemp())
-    for name in ("db", "users"):
+    for name in ("db.database", "repositories.users"):
         sys.modules.pop(name, None)
-    db = importlib.import_module("db")
-    users = importlib.import_module("users")
+    db = importlib.import_module("db.database")
+    users = importlib.import_module("repositories.users")
     db.init_db()
-    conn = db.connect()
-    yield users.UserRepository(conn)
-    conn.close()
+    with Session(db.engine, expire_on_commit=False) as session:
+        yield users.UserRepository(session)
 
 
 def test_create_find_and_reject_a_duplicate(repo):
     uid = repo.create("a@alustudent.com", "Ada", "technician", "password-1")
-    assert repo.by_id(uid)["full_name"] == "Ada"
-    assert repo.by_username("a@alustudent.com")["id"] == uid
-    with pytest.raises(sqlite3.IntegrityError):
+    assert repo.by_id(uid).full_name == "Ada"
+    assert repo.by_username("a@alustudent.com").id == uid
+    with pytest.raises(IntegrityError):
         repo.create("a@alustudent.com", "Ada again", "technician", "password-1")
 
 
 def test_update_changes_only_the_given_fields(repo):
     uid = repo.create("b@alustudent.com", "Bo", "technician", "password-1")
-    old_hash = repo.by_id(uid)["password_hash"]
+    old_hash = repo.by_id(uid).password_hash
     repo.update(uid, full_name="  Bola  ", role="clinician")
     row = repo.by_id(uid)
-    assert (row["full_name"], row["role"], row["active"], row["password_hash"]) == ("Bola", "clinician", 1, old_hash)
+    assert (row.full_name, row.role, row.active, row.password_hash) == ("Bola", "clinician", True, old_hash)
     repo.update(uid, active=False, password="new-password-1")
     row = repo.by_id(uid)
-    assert row["active"] == 0 and row["password_hash"] != old_hash
+    assert row.active is False and row.password_hash != old_hash
 
 
 def test_the_last_active_admin_is_counted_correctly(repo):
@@ -83,11 +83,11 @@ def test_the_last_active_admin_is_counted_correctly(repo):
 
 def test_login_time_and_password_are_recorded(repo):
     uid = repo.create("c@alustudent.com", "Cy", "clinician", "password-1")
-    assert repo.by_id(uid)["last_login"] is None
+    assert repo.by_id(uid).last_login is None
     repo.record_login(uid)
-    assert repo.by_id(uid)["last_login"]
+    assert repo.by_id(uid).last_login
     repo.set_password(uid, "another-password")
-    assert repo.by_id(uid)["password_hash"].startswith("pbkdf2_sha256$")
+    assert repo.by_id(uid).password_hash.startswith("pbkdf2_sha256$")
 
 
 def test_a_user_with_no_records_can_be_deleted(repo):

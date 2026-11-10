@@ -7,9 +7,9 @@ import cv2
 import numpy as np
 import pytest
 
-from classifiers import Classifier
-from model import CLASS_NAMES
-from pipeline import CellDetector, FieldPipeline, crop_at
+from services.classifiers import Classifier
+from services.grading import CLASS_NAMES
+from services.pipeline import CellDetector, FieldPipeline, crop_at
 
 
 def png(width, height):
@@ -98,7 +98,7 @@ def test_a_big_photo_without_a_detector_is_graded_whole_and_flagged():
 
 
 def test_the_placeholder_classifier_marks_results_as_mock():
-    from classifiers import StubClassifier
+    from services.classifiers import StubClassifier
     r = FieldPipeline(FakeDetector(BOXES), StubClassifier()).analyze(png(1000, 1000))
     assert r["mock"] is True and r["mode"] == "cell"
 
@@ -118,3 +118,17 @@ def test_crops_stay_inside_the_photo_at_the_edges():
     img = np.zeros((300, 400, 3), dtype="uint8")
     for cx, cy in [(0, 0), (399, 299), (200, 150)]:
         assert crop_at(img, cx, cy).shape[:2] == (200, 200)
+
+
+def test_the_server_refuses_to_start_on_made_up_numbers(monkeypatch):
+    """No model files and no explicit placeholder switch: building the pipeline must fail with a clear message."""
+    from services.pipeline import build_pipeline
+    monkeypatch.delenv("CERVIGRADE_ALLOW_PLACEHOLDER", raising=False)
+    with pytest.raises(RuntimeError, match="cannot start"):
+        build_pipeline()
+
+
+def test_placeholder_mode_starts_when_asked_for_on_purpose(monkeypatch):
+    from services.pipeline import build_pipeline
+    monkeypatch.setenv("CERVIGRADE_ALLOW_PLACEHOLDER", "1")
+    assert build_pipeline().classifier.is_real is False

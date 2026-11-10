@@ -10,5 +10,6 @@ import tempfile
 
 os.environ["CERVIGRADE_MODEL"] = os.path.join(tempfile.gettempdir(), "no-such-model.keras")
 os.environ["CERVIGRADE_DETECTOR"] = os.path.join(tempfile.gettempdir(), "no-such-detector.pt")
+os.environ["CERVIGRADE_ALLOW_PLACEHOLDER"] = "1"      # tests run on purpose without the real models
 os.environ.setdefault("CERVIGRADE_DATA", tempfile.mkdtemp(prefix="cervigrade-tests-"))
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), ".."))

@@ -30,7 +30,7 @@ Useful addresses once it runs:
 
 | What | Where |
 |---|---|
-| Backend code | `src/app/backend/*.py` |
+| Backend code | `src/app/backend/` |
 | Web page | `src/app/frontend/index.html` |
 | Model files | `models/` (`efficientnetb0_cric_retrained.keras` is the CNN, `stage2_severity_oversampled_best.pt` is the YOLO detector). They are on GitHub, force-added past `.gitignore` (which skips other weight files). |
 | **Database and uploaded photos** | **`app_data/` in the repo root** (not on GitHub either) |
@@ -51,17 +51,20 @@ A **class** is a cookie cutter: it bundles some data with the actions that belon
 
 | File | Classes | Job |
 |---|---|---|
-| `main.py` | | The front door. Defines every endpoint (sign-in, users, slides, Grad-CAM, feedback, stats) and who may call it. |
-| `classifiers.py` | `Classifier` (rulebook), `EfficientNetClassifier`, `StubClassifier` | Grades cell crops. The real model and the placeholder both follow the same rulebook, so the app does not care which one it has. |
-| `pipeline.py` | `CellDetector`, `FieldPipeline` | The detector finds cells; the pipeline joins it to a classifier and decides the photo's result. |
-| `institution.py` | `InstitutionPolicy` | The email rule: only `@alustudent.com`. |
-| `security.py` | `PasswordHasher`, `TokenService` | Salted password hashes (PBKDF2) and signed login tokens (JWT, 8 hours). |
-| `users.py` | `UserRepository` | All database work for accounts. |
-| `db.py` | | Opens the database, creates the tables, adds the first admin. |
-| `records.py` | | Builds the answers the page shows (a slide with its images, grades and reviews). |
-| `model.py` | | The grading vocabulary: the six grades, the three groups, how to turn probabilities into a result. |
-| `gradcam.py` | | Paints the heat as a coloured overlay. |
-| `manage.py` | | Admin commands from the terminal: `list-users`, `create-user`, `reset-password`, `seed-demo`. |
+| `main.py` | | The front door. Creates the app, sets CORS and plugs in the routers. |
+| `routers/` | | The endpoints, one file per topic (sign-in, users, patients, slides, Grad-CAM and feedback, stats, status) and who may call each. |
+| `schemas/`, `dependencies.py` | | What each request must contain, and who is signed in. |
+| `services/classifiers.py` | `Classifier` (rulebook), `EfficientNetClassifier`, `StubClassifier` | Grades cell crops. The real model and the placeholder both follow the same rulebook, so the rest of the app does not care which one it has. |
+| `services/pipeline.py` | `CellDetector`, `FieldPipeline` | The detector finds cells; the pipeline joins it to a classifier and decides the photo's result. The app refuses to start if either model cannot load, unless placeholder mode is switched on on purpose. |
+| `core/institution.py` | `InstitutionPolicy` | The email rule: only `@alustudent.com`. |
+| `core/security.py` | `PasswordHasher`, `TokenService` | Salted password hashes (PBKDF2) and signed login tokens (JWT, 8 hours). |
+| `repositories/users.py` | `UserRepository` | All database work for accounts, written with the ORM. |
+| `models/` | `User`, `Patient`, `Slide`, `SlideImage`, `Prediction`, `FeedbackEntry` | The six tables written as Python classes (SQLModel, an ORM). One class is one table, one object is one row. |
+| `db/database.py` | | Opens the database and its sessions, creates the tables, adds the first admin. |
+| `repositories/records.py` | | Builds the answers the page shows (a slide with its images, grades and reviews). |
+| `services/grading.py` | | The grading vocabulary: the six grades, the three groups, how to turn probabilities into a result. |
+| `services/gradcam.py` | | Paints the heat as a coloured overlay. |
+| `cli.py` | | Admin commands from the terminal (`python cli.py ...`): `list-users`, `create-user`, `reset-password`, `seed-demo`. |
 | `tests/` | | Automated tests (`python -m pytest tests -q`). |
 
 **Page** (`src/app/frontend/`): `index.html` is only the markup. `css/styles.css` is the look. Behaviour is in `js/`:
@@ -77,7 +80,7 @@ The OOP ideas, in your own code: **abstraction and polymorphism** (`Classifier` 
 
 ## 4. The database
 
-**Type:** SQLite. It is a real relational (SQL) database that lives in a single file, so there is no server to install. Python includes it (`sqlite3`).
+**Type:** SQLite. It is a real relational (SQL) database that lives in a single file, so there is no server to install. The backend talks to it through SQLModel, an ORM: each table is a Python class in `models/`, and the queries are written in Python instead of SQL text.
 
 **Why not PostgreSQL?** The proposal (section 3.9) names PostgreSQL. For a laptop prototype SQLite is simpler, and the tables follow the same entity-relationship diagram, so they can move to PostgreSQL later. State this as a known difference from the proposal. It is not a mistake.
 
@@ -143,8 +146,8 @@ Row counts per table:
 ## 6. What happens when a technician uploads a photo
 
 1. The page sends the photos to `POST /slides` with the login token in the request header.
-2. `main.py` checks the token and the role, saves each file into `app_data/uploads/<slide id>/`, and creates rows in `patients`, `slides` and `slide_images`.
-3. For each photo `pipeline.py` runs:
+2. `routers/slides.py` checks the token and the role, saves each file into `app_data/uploads/<slide id>/`, and creates rows in `patients`, `slides` and `slide_images`.
+3. For each photo `services/pipeline.py` runs:
    - The **YOLO11n detector** slides a 224-pixel window over the photo and boxes every cell it finds. Overlapping boxes are merged.
    - Each box is cut out as a 200 by 200 crop.
    - The **EfficientNetB0 CNN** grades every crop.

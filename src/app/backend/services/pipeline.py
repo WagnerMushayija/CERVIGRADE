@@ -25,11 +25,12 @@ import time
 
 import numpy as np
 
-from classifiers import load_classifier
-from model import (CLASS_NAMES, LOW_CONFIDENCE, SEVERITY_RANK, TIER_LABELS, TIER_RANK, _REPO_ROOT,
-                   describe, tier_of_class, tier_probabilities)
+from core.config import REPO_ROOT
+from services.classifiers import ModelLoadError, load_classifier
+from services.grading import (CLASS_NAMES, LOW_CONFIDENCE, SEVERITY_RANK, TIER_LABELS, TIER_RANK,
+                                  describe, tier_of_class, tier_probabilities)
 
-DETECTOR_PATH = os.environ.get("CERVIGRADE_DETECTOR", os.path.join(_REPO_ROOT, "models", "stage2_severity_oversampled_best.pt"))
+DETECTOR_PATH = os.environ.get("CERVIGRADE_DETECTOR", os.path.join(REPO_ROOT, "models", "stage2_severity_oversampled_best.pt"))
 DET_CONF = float(os.environ.get("CERVIGRADE_DET_CONF", "0.25"))     # the detector keeps every box above this
 CNN_SURE = float(os.environ.get("CERVIGRADE_CNN_SURE", "0.9"))      # an abnormal cell must be this sure to count
 TILE, STRIDE, CROP = 224, 112, 200                                  # detector window, its step, CNN crop size
@@ -156,7 +157,7 @@ class FieldPipeline:
     def explain(self, path, box, class_index, overlay=True):
         """Grad-CAM picture (PNG bytes) for the cell in `box` of the stored photo, or for the whole image when box is None."""
         import cv2
-        import gradcam
+        from services import gradcam
         img = cv2.imread(path, cv2.IMREAD_COLOR)
         crop = img if box is None else crop_at(img, (box[0] + box[2]) / 2, (box[1] + box[3]) / 2)
         with self._lock:
@@ -246,5 +247,27 @@ class FieldPipeline:
         }
 
 
+def build_pipeline():
+    """Build the pipeline the server uses. The real models are required: if either fails to load, the server stops
+    with a clear message instead of quietly answering with made-up numbers. Set CERVIGRADE_ALLOW_PLACEHOLDER=1 to
+    run on purpose without them (demos and tests)."""
+    allow_placeholder = os.environ.get("CERVIGRADE_ALLOW_PLACEHOLDER") == "1"
+    detector = CellDetector()
+    problems = []
+    try:
+        classifier = load_classifier(allow_placeholder=allow_placeholder)
+    except ModelLoadError as e:
+        classifier = None
+        problems.append(str(e))
+    if not allow_placeholder and not detector.ready:
+        problems.append(f"the detector could not be loaded from {DETECTOR_PATH}")
+    if problems:
+        raise RuntimeError("CerviGrade cannot start: " + "; ".join(problems)
+                           + ". Fix the file paths, or set CERVIGRADE_ALLOW_PLACEHOLDER=1 to run with placeholder numbers on purpose.")
+    if allow_placeholder:
+        print("[pipeline] PLACEHOLDER MODE is on: grades are not from the real model.")
+    return FieldPipeline(detector, classifier)
+
+
 # The pipeline the running server uses, built once when the module is first imported.
-PIPELINE = FieldPipeline(CellDetector(), load_classifier())
+PIPELINE = build_pipeline()

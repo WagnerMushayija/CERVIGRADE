@@ -2,7 +2,7 @@
 The grading vocabulary shared by the whole backend: the six grades, how serious each is, the three groups
 they fall into, and how to turn six probabilities into the result the API returns.
 
-The classes that actually run a model are in classifiers.py. They load the trained EfficientNetB0-on-CRIC
+The classes that actually run a model are in services/classifiers.py. They load the trained EfficientNetB0-on-CRIC
 checkpoint from the repo's models/ folder (set CERVIGRADE_MODEL to point at a different file).
 
 CRIC's six Bethesda classes, in the alphabetical order used in the training notebooks
@@ -10,6 +10,8 @@ CRIC's six Bethesda classes, in the alphabetical order used in the training note
 """
 
 import os
+
+from core.config import REPO_ROOT
 
 CLASS_NAMES = ["ASC-H", "ASC-US", "HSIL", "LSIL", "Negative", "SCC"]
 
@@ -28,9 +30,8 @@ _CLASS_TO_TIER = {c: t for t, members in TIER_MEMBERS.items() for c in members}
 # Below this confidence the page asks the reader to look at the image more closely.
 LOW_CONFIDENCE = 0.60
 
-# Weights live in the repo's models/ folder (src/app/backend -> three levels up).
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-MODEL_PATH = os.environ.get("CERVIGRADE_MODEL", os.path.join(_REPO_ROOT, "models", "efficientnetb0_cric_retrained.keras"))
+# Weights live in the repo's models/ folder.
+MODEL_PATH = os.environ.get("CERVIGRADE_MODEL", os.path.join(REPO_ROOT, "models", "efficientnetb0_cric_retrained.keras"))
 
 def tier_of_class(class_name):
     return _CLASS_TO_TIER[class_name]

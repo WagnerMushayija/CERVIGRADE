@@ -36,17 +36,31 @@ Every experiment that was run, with its result and the notebook it came from, is
 
 ## How the app code is organised
 
-Backend (`src/app/backend/`), one job per file, with classes for the parts that hold state:
+Backend (`src/app/backend/`), arranged the way FastAPI projects usually are, one folder per job:
 
-- `classifiers.py`: `Classifier` (the rulebook) with `EfficientNetClassifier` (the real model, with
-  Grad-CAM) and `StubClassifier` (a placeholder). The rest of the app does not care which one it uses.
-- `pipeline.py`: `CellDetector` (YOLO) and `FieldPipeline` (detector + classifier, the photo verdict).
-- `institution.py`: `InstitutionPolicy`, the "only @alustudent.com" rule.
-- `security.py`: `PasswordHasher` and `TokenService`.
-- `users.py`: `UserRepository`, all database work for accounts.
-- `db.py`, `records.py`, `model.py`, `gradcam.py`, `manage.py`, `main.py`: storage, response building,
-  grading vocabulary, heat-map drawing, admin commands, and the API endpoints.
+- `main.py`: creates the app, sets CORS and plugs in the routers. Start it with `uvicorn main:app`.
+- `routers/`: the API endpoints, one file per topic (`auth.py`, `users.py`, `patients.py`, `slides.py`,
+  `predictions.py`, `stats.py`, `status.py`).
+- `schemas/`: what each request must contain (Pydantic models). `dependencies.py` holds who is signed in
+  and which role an endpoint needs.
+- `models/`: the six database tables written as Python classes with SQLModel, an ORM (`User`, `Patient`,
+  `Slide`, `SlideImage`, `Prediction`, `FeedbackEntry`). One class is one table and one object is one row.
+- `repositories/`: the queries, written with the ORM instead of SQL text. `users.py` has `UserRepository` and
+  `records.py` builds slide records.
+- `db/database.py`: the database connection and sessions, table creation and the first admin. The database is
+  a SQLite file, and moving to PostgreSQL later means changing `DATABASE_URL`.
+- `services/`: the model side. `classifiers.py` has `Classifier` (the rulebook), `EfficientNetClassifier`
+  (the real model, with Grad-CAM) and `StubClassifier` (a placeholder that is only used on purpose). `pipeline.py`
+  has `CellDetector` (YOLO) and `FieldPipeline` (detector + classifier, the photo verdict), and the app refuses
+  to start if a model cannot load unless placeholder mode is switched on. `grading.py` has the six grades and
+  three groups. `gradcam.py` draws the heat map.
+- `core/`: `config.py` (settings read from environment variables), `security.py` (`PasswordHasher`,
+  `TokenService`) and `institution.py` (`InstitutionPolicy`, the "only @alustudent.com" rule).
+- `cli.py`: admin commands from the terminal, for example `python cli.py list-users`.
 - `tests/`: automated tests (`python -m pytest tests -q`, no model weights needed).
+
+Other websites are blocked from calling the API unless listed in `CERVIGRADE_ORIGINS`.
+`deploy/` has the script that sets the app up on a fresh Ubuntu server and the one that updates it.
 
 Frontend (`src/app/frontend/`): `index.html` is the markup only. `css/styles.css` is the look.
 `js/` is plain JavaScript modules: `App.js` builds the shared parts; `core/` has `ApiClient`,
@@ -134,9 +148,9 @@ data folder).
 
 If you are locked out or want demo accounts, run from `src/app/backend`:
 
-    python manage.py list-users
-    python manage.py reset-password admin@alustudent.com "a new password"
-    python manage.py seed-demo
+    python cli.py list-users
+    python cli.py reset-password admin@alustudent.com "a new password"
+    python cli.py seed-demo
 
 ## Tests
 

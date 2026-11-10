@@ -6,6 +6,7 @@ pillow==10.4.0
 numpy==1.26.4
 tensorflow==2.17.0
 PyJWT==2.9.0
+sqlmodel==0.0.22
 ultralytics>=8.3
 torch>=2.2
 torchvision>=0.17
