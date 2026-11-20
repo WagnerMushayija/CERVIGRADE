@@ -11,6 +11,7 @@ import { Toast } from "./core/Toast.js";
 import { AccountPage } from "./pages/AccountPage.js";
 import { LoginPage } from "./pages/LoginPage.js";
 import { NewCheckPage } from "./pages/NewCheckPage.js";
+import { PrivacyPage } from "./pages/PrivacyPage.js";
 import { RecordsPage } from "./pages/RecordsPage.js";
 import { SlideDetailPage } from "./pages/SlideDetailPage.js";
 import { SlideListPage } from "./pages/SlideListPage.js";
@@ -19,6 +20,7 @@ import { UsersPage } from "./pages/UsersPage.js";
 /* Which page answers which address, and which roles may open it. */
 const ROUTES = [
   { pattern: /^\/login$/, Page: LoginPage, open: true },
+  { pattern: /^\/privacy$/, Page: PrivacyPage, open: true },
   { pattern: /^\/new$/, Page: NewCheckPage, roles: ["technician"] },
   { pattern: /^\/slides$/, Page: SlideListPage },
   { pattern: /^\/slides\/(\d+)$/, Page: SlideDetailPage, params: m => ({ id: Number(m[1]) }) },

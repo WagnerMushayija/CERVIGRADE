@@ -35,9 +35,8 @@ export class Router {
     const view = $("view");
     const ctx = { query, params: {}, isCurrent: () => mine === this._navId };
 
-    if (!user && path !== "/login") { session.notice = "Please sign in to continue."; location.replace("#/login"); return; }
-
     const match = this._match(path, user ? user.role : null);
+    if (!user && !(match && match.route.open)) { session.notice = "Please sign in to continue."; location.replace("#/login"); return; }
     if (!match) { location.replace("#" + HOME[user.role]); return; }
     ctx.params = match.params;
     view.replaceChildren(el("p", { class: "count" }, "Loading…"));
